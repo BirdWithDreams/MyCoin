@@ -117,16 +117,23 @@ class Point:
         y = s * (self.x - x) - self.y
         return self.__class__(x, y)
 
+    def __rmul__(self, coefficient):
+        coef = coefficient
+        current = self
+        result = self.__class__(None, None)
+        while coef:
+            if coef & 1:
+                result += current
+            current += current
+            coef >>= 1
+        return result
+
+    def __mul__(self, other):
+        if isinstance(other, int):
+            return self.__rmul__(other)
+
     def __eq__(self, other):
         return type(self) is type(other) and self.x == other.x and self.y == other.y
 
     def __repr__(self):
         return f'Point ({self.x}, {self.y})'
-
-
-p1 = Point(5, 7)
-p2 = Point(0, 7)
-f = p1(-1, -1)
-g = p1(2, 5)
-print(f+g)
-print(f+f)
