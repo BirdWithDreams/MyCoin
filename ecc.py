@@ -17,22 +17,35 @@ class Field:
         self.num = num % self.base
 
     def __add__(self, other):
-        if self.base != other.base:
+        if isinstance(other, int):
+            return self.__class__(self.num + other)
+
+        if type(self) is not type(other):
             raise TypeError(f'Cannot add two numbers in different Fields ({self.base} and {other.base})')
 
-        return self.__class__((self.num + other.num) % self.base)
+        return self.__class__(self.num + other.num)
+
+    def __sub__(self, other):
+        if type(self) is not type(other):
+            raise TypeError(f'Cannot add two numbers in different Fields ({self.base} and {other.base})')
+
+        return self.__class__(self.num - other.num)
 
     def __mul__(self, other):
         if isinstance(other, int):
-            pass
+            return self.__class__(self.num * other)
 
-        if self.base != other.base:
+        if type(self) is not type(other):
             raise TypeError(f'Cannot add two numbers in different Fields ({self.base} and {other.base})')
 
-        return self.__class__((self.num * other.num) % self.base)
+        return self.__class__(self.num * other.num)
+
+    def __rmul__(self, other):
+        if isinstance(other, int):
+            return self.__class__(self.num * other)
 
     def __truediv__(self, other):
-        if self.base != other.base:
+        if type(self) is not type(other):
             raise TypeError(f'Cannot add two numbers in different Fields ({self.base} and {other.base})')
 
         inverse = other ** (self.base - 2)
@@ -42,20 +55,26 @@ class Field:
         return self.__class__(pow(self.num, power % (self.base - 1), self.base))
 
     def __eq__(self, other):
-        return self.num == other.num and self.base == other.base
+        if isinstance(other, int):
+            return self.num == other % self.base
+
+        return type(self) is type(other) and self.num == other.num
 
     def __repr__(self):
         return f'FieldElement object {self.num}_{self.base}'
 
 
 def point(cls):
-    def cur_point(a, b):
-        @staticmethod
-        def _check(x, y):
-            return y * y == x ** 3 + a * x + b
+    def cur_point(_a, _b):
+        class SubPoint(cls):
+            a = _a
+            b = _b
 
-        setattr(cls, '_check', _check)
-        return cls
+            @staticmethod
+            def _check(x, y):
+                return y * y == x ** 3 + _a * x + _b
+
+        return SubPoint
 
     return cur_point
 
@@ -72,7 +91,7 @@ class Point:
             raise ValueError(f'({x}, {y}) is not on the curve')
 
     def __add__(self, other):
-        if self.a != other.a or self.b != other.b:
+        if type(self) is not type(other):
             raise TypeError(f'Points {self}, {other} is not on the same curve')
 
         if self.x is None:
@@ -82,9 +101,12 @@ class Point:
             return self
 
         if self == other:
+            if self.y == 0:
+                self.__class__(None, None)
+
             s = (3 * self.x ** 2 + self.a) / (2 * self.y)
             x = s * s - 2 * self.x
-            y = s(self.x - x) - self.y
+            y = s * (self.x - x) - self.y
             return self.__class__(x, y)
 
         if self.x == other.x:
@@ -96,7 +118,7 @@ class Point:
         return self.__class__(x, y)
 
     def __eq__(self, other):
-        return self.x == other.x and self.y == other.y
+        return type(self) is type(other) and self.x == other.x and self.y == other.y
 
     def __repr__(self):
         return f'Point ({self.x}, {self.y})'
