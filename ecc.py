@@ -1,3 +1,12 @@
+import hashlib
+from random import randint
+
+
+def hash256(s):
+    """two rounds of sha256"""
+    return hashlib.sha256(hashlib.sha256(s).digest()).digest()
+
+
 def field(cls):
     def sub_field(_base):
         if not isinstance(_base, int) or _base <= 0:
@@ -25,11 +34,26 @@ class Field:
 
         return self.__class__(self.num + other.num)
 
+    def __radd__(self, other):
+        return self + other
+
     def __sub__(self, other):
+        if isinstance(other, int):
+            return self.__class__(self.num - other)
+
         if type(self) is not type(other):
             raise TypeError(f'Cannot add two numbers in different Fields ({self.base} and {other.base})')
 
         return self.__class__(self.num - other.num)
+
+    def __rsub__(self, other):
+        if isinstance(other, int):
+            return self.__class__(other - self.num)
+
+        if type(self) is not type(other):
+            raise TypeError(f'Cannot add two numbers in different Fields ({self.base} and {other.base})')
+
+        return self.__class__(other.num - self.num)
 
     def __mul__(self, other):
         if isinstance(other, int):
@@ -147,16 +171,17 @@ class SECP256K1:
 
 
 class S256Field(Field(SECP256K1.P)):
-    pass
+    def __repr__(self):
+        return f'{self.num:x}'
 
 
 class S256Point(Point(S256Field(SECP256K1.A), S256Field(SECP256K1.B))):
     def verify(self, z, sig):
-        z = S256Field(z)
-        u = z / sig.s
-        v = sig.r / sig.s
-        total = u * SECP256K1.G + v * self
-        return total.x == self.r
+        s_inv = pow(sig.s.num, SECP256K1.N - 2, SECP256K1.N)
+        u = z * s_inv % SECP256K1.N
+        v = sig.r.num * s_inv % SECP256K1.N
+        total = u * G + v * self
+        return total.x.num == sig.r
 
 
 G = S256Point(
@@ -170,5 +195,36 @@ SECP256K1.G = G
 class Signature:
 
     def __init__(self, r, s):
-        self.r = S256Field(r)
-        self.s = S256Field(s)
+        self.r = S256Field(r) if isinstance(r, int) else r
+        self.s = S256Field(s) if isinstance(s, int) else s
+
+    def __repr__(self):
+        return f'Signature ({self.r}, {self.s})'
+
+
+class PrivateKey:
+    def __init__(self, secret):
+        self.secret = secret
+        self.point = secret * SECP256K1.G
+
+    def hex(self):
+        return f'{self.secret:x}'.zfill(64)
+
+    def sign(self, z):
+        k = randint(0, SECP256K1.N)
+
+        r = (k * G).x.num
+        k_inv = pow(k, SECP256K1.N - 2, SECP256K1.N)
+        s = (z + r * self.secret) * k_inv % SECP256K1.N
+        if s > SECP256K1.N / 2:
+            s = SECP256K1.N - s
+        return Signature(r, s)
+
+
+key = PrivateKey(12345)
+z = int.from_bytes(hash256(b'Programming Bitcoin!'), 'big')
+sign = key.sign(z)
+print(sign)
+print(key.point.verify(z, sign))
+
+
