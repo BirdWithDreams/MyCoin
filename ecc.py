@@ -1,6 +1,7 @@
 import hashlib
-from random import randint
-from secp256k1 import SECP256K1, S256Field, S256Point
+import hmac
+
+from secp256k1 import SECP256K1, S256Field
 
 
 def hash256(s):
@@ -27,20 +28,35 @@ class PrivateKey:
         return f'{self.secret:x}'.zfill(64)
 
     def sign(self, z):
-        k = randint(0, SECP256K1.N)
+        k = self.deterministic_k(z)
 
-        r = (k * G).x.num
+        r = (k * SECP256K1.G).x.num
         k_inv = pow(k, SECP256K1.N - 2, SECP256K1.N)
         s = (z + r * self.secret) * k_inv % SECP256K1.N
         if s > SECP256K1.N / 2:
             s = SECP256K1.N - s
         return Signature(r, s)
 
+    def deterministic_k(self, z):
+        k = b'\x00' * 32
+        v = b'\x01' * 32
 
-key = PrivateKey(12345)
-z = int.from_bytes(hash256(b'Programming Bitcoin!'), 'big')
-sign = key.sign(z)
-print(sign)
-print(key.point.verify(z, sign))
+        if z > SECP256K1.N:
+            z -= SECP256K1.N
 
+        z_bytes = z.to_bytes(32, 'big')
+        secret_bytes = self.secret.to_bytes(32, 'big')
 
+        k = hmac.new(k, v + b'\x00' + secret_bytes + z_bytes, hashlib.sha256).digest()
+        v = hmac.new(k, v, hashlib.sha256).digest()
+        k = hmac.new(k, v + b'\x01' + secret_bytes + z_bytes, hashlib.sha256).digest()
+        v = hmac.new(k, v, hashlib.sha256).digest()
+
+        while True:
+            v = hmac.new(k, v, hashlib.sha256).digest()
+            candidate = int.from_bytes(v, 'big')
+            if 1 <= candidate < SECP256K1.N:
+                return candidate
+
+            k = hmac.new(k, v + b'\x00' + secret_bytes + z_bytes, hashlib.sha256).digest()
+            v = hmac.new(k, v, hashlib.sha256).digest()
