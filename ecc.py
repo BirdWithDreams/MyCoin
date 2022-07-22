@@ -1,12 +1,52 @@
 import hashlib
 import hmac
+from io import BytesIO
 
-from secp256k1 import SECP256K1, S256Field
+from secp256k1 import SECP256K1, S256Field, S256Point
+
+BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
 
 def hash256(s):
     """two rounds of sha256"""
     return hashlib.sha256(hashlib.sha256(s).digest()).digest()
+
+
+def encode_base58(s):
+    count = 0
+    for c in s:
+        if c == 0:
+            count += 1
+        else:
+            break
+
+    num = int.from_bytes(s, 'big')
+    prefix = '1' * count
+    result = ''
+
+    while num > 0:
+        num, mod = divmod(num, 58)
+        result = BASE58_ALPHABET[mod] + result
+
+    return prefix + result
+
+
+def encode_base58_checksum(b):
+    return encode_base58(b + hash256(b)[:4])
+
+
+def decode_base58(s):
+    num = 0
+    for c in s:
+        num *= 58
+        num += BASE58_ALPHABET.index(c)
+
+    combined = num.to_bytes(25, byteorder='big')
+    checksum = combined[-4:]
+
+    if hash256(combined[:-4])[:4] != checksum:
+        raise ValueError('bad address: {} {}'.format(checksum, hash256(combined[:-4])[:4]))
+    return combined[1:-4]
 
 
 class Signature:
@@ -18,11 +58,58 @@ class Signature:
     def __repr__(self):
         return f'Signature ({self.r}, {self.s})'
 
+    def der(self):
+        rbin = self.r.to_bytes(32, byteorder='big')
+        rbin = rbin.lstrip(b'\x00')
+
+        if rbin[0] & 0x80:
+            rbin = b'\x00' + rbin
+
+        result = bytes([2, len(rbin)]) + rbin
+        sbin = self.s.to_bytes(32, byteorder='big')
+        sbin = sbin.lstrip(b'\x00')
+
+        if sbin[0] & 0x80:
+            sbin = b'\x00' + sbin
+
+        result += bytes([2, len(sbin)]) + sbin
+        return bytes([0x30, len(result)]) + result
+
+    @classmethod
+    def parse(cls, signature_bin):
+        s = BytesIO(signature_bin)
+        compound = s.read(1)[0]
+
+        if compound != 0x30:
+            raise SyntaxError("Bad Signature")
+
+        length = s.read(1)[0]
+        if length + 2 != len(signature_bin):
+            raise SyntaxError("Bad Signature Length")
+
+        marker = s.read(1)[0]
+        if marker != 0x02:
+            raise SyntaxError("Bad Signature")
+
+        rlength = s.read(1)[0]
+        r = int.from_bytes(s.read(rlength), 'big')
+        marker = s.read(1)[0]
+
+        if marker != 0x02:
+            raise SyntaxError("Bad Signature")
+
+        slength = s.read(1)[0]
+        s = int.from_bytes(s.read(slength), 'big')
+
+        if len(signature_bin) != 6 + rlength + slength:
+            raise SyntaxError("Signature too long")
+        return cls(r, s)
+
 
 class PrivateKey:
     def __init__(self, secret):
         self.secret = secret
-        self.point = secret * SECP256K1.G
+        self.point: S256Point = secret * SECP256K1.G
 
     def hex(self):
         return f'{self.secret:x}'.zfill(64)
@@ -60,3 +147,17 @@ class PrivateKey:
 
             k = hmac.new(k, v + b'\x00' + secret_bytes + z_bytes, hashlib.sha256).digest()
             v = hmac.new(k, v, hashlib.sha256).digest()
+
+    def wif(self, compressed=True, testnet=False):
+        secret_bytes = self.secret.to_bytes(32, 'big')
+
+        if testnet:
+            prefix = b'\xef'
+        else:
+            prefix = b'\x80'
+        if compressed:
+            suffix = b'\x01'
+        else:
+            suffix = b''
+
+        return encode_base58_checksum(prefix + secret_bytes + suffix)
