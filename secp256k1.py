@@ -1,4 +1,5 @@
 from field import Field
+from helper import hash160, encode_base58_checksum
 from point import Point
 
 
@@ -55,6 +56,15 @@ class S256Point(Point(S256Field(SECP256K1.A), S256Field(SECP256K1.B))):
         if is_even:
             return cls(x, even_beta)
         return cls(x, odd_beta)
+
+    def hash160(self, compressed=True):
+        return hash160(self.sec(compressed))
+
+    def address(self, compressed=True, testnet=False):
+        h160 = self.hash160(compressed)
+        prefix = b'\x6f' if testnet else b'\x00'
+
+        return encode_base58_checksum(prefix + h160)
 
 
 G = S256Point(
